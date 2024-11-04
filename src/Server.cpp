@@ -62,9 +62,27 @@ int main(int argc, char **argv) {
   }
   std::cout << "Client connected\n";
 
-  // Send the hardcoded response +PONG\r\n to the client
-  const char* response = "+PONG\r\n";
-  send(client_fd, response, strlen(response), 0);
+  // Loop to read multiple PING commands from the client and respond with +PONG\r\n
+  while(true)
+  {
+    char buffer[1024];
+
+    ssize_t bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+    if(bytes_received < 0) {
+      std::cerr << "Failed to read from client.\n";
+      break; // Break on read error
+    }
+    else if(bytes_received == 0) {
+      std::cout << "Client disconnected.\n";
+      break; // Client has disconnected
+    }
+
+    // Null-terminate the received message for safe printing (not strictly necessary)
+    buffer[bytes_received] = '\0';
+
+    const char* response = "+PONG\r\n";
+    send(client_fd, response, strlen(response), 0);
+  }
   
   // Close the client socket and the server socket
   close(client_fd);
