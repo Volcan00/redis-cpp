@@ -9,8 +9,14 @@
 #include <netdb.h>
 #include <thread>
 
+#include "RESPParser.h"
+
 void handle_client(int client_socket) {
-  std::string accumulated_data; // To accumulate incoming data
+  std::string accumulated_data;       // To accumulate incoming data
+  RESPParser parser;                  // Parser instance
+  std::vector<std::string> commands;  // Vector to store parsed commands as strings
+  int iteration = 1;
+
 
   // Continuously handle client requests
   while(true) {
@@ -25,85 +31,41 @@ void handle_client(int client_socket) {
 
     // Null-terminate the received data
     buffer[bytes_received] = '\0';
-    accumulated_data.append(buffer); // Accumulate data
+    accumulated_data.append(buffer, bytes_received); // Accumulate data
 
-    // Check if we have a complete message
-    while(true) {
-      // Find the start of the message (should start with '*')
-      if(accumulated_data.empty() || accumulated_data[0] != '*') {
-        break; // Not a valid message, wait for more data
-      }
+    // Feed accumulated data to the parser
+    parser.feed(accumulated_data);
 
-      size_t end_pos = accumulated_data.find("\r\n");
-      if(end_pos == std::string::npos) {
-        break; // Not enough data to process the message
-      }
-      
-      // Extract the number of elements in the array
-      int num_elements = atoi(accumulated_data.substr(1, end_pos - 1).c_str());
+    try {
+      // Parse all available data into commands
+      parser.parse();
 
-      // Move past the initial \r\n
-      size_t current_pos = end_pos + 2;
-
-      for(int i = 0; i < num_elements; ++i) {
-        // Check for the bulk string prefix '$'
-        if(accumulated_data[current_pos] != '$') {
-          break; // Invalid command format
-        }
-
-        // Find the end of the length line for the bulk string
-        end_pos = accumulated_data.find("\r\n", current_pos);
-        if(end_pos == std::string::npos) {
-          break; // Not enough data to read length
-        }
-
-        // Extract bulk length
-        int bulk_length = atoi(accumulated_data.substr(current_pos + 1, end_pos - current_pos - 1).c_str());
-        current_pos = end_pos + 2; // Move past the $length\r\n
-
-        end_pos = current_pos + bulk_length + 2;  // Include \r\n
-        if(accumulated_data.length() < end_pos) {
-          break;  // Not enough data to read the full bulk string
-        }
-        
-        // Extract the command
-        std::string command = accumulated_data.substr(current_pos, bulk_length);
-
-        // Move the pointer to the end of the bulk string
-        current_pos = end_pos;
-
-        // Respond to PING command
-        if(command == "PING") {
-          const char* response = "+PONG\r\n";
-          send(client_socket, response, strlen(response), 0);
-        }
-        // Respond to ECHO command
-        else if(command == "ECHO") {
-          // Get the message to echo
-          end_pos = accumulated_data.find("\r\n", current_pos);
-          if(end_pos == std::string::npos) {
-            break; // Not enough data for the echo message
-          }
-
-          bulk_length = atoi(accumulated_data.substr(current_pos + 1, end_pos - current_pos - 1).c_str()); // Get length
-          current_pos = end_pos + 2; // Move past the $length\r\n
-
-          std::string message = accumulated_data.substr(current_pos, bulk_length); // Extract the message
-
-          // Send the echoed message back
-          std::string response = "$" + std::to_string(message.length()) + "\r\n" + message + "\r\n";
-          send(client_socket, response.c_str(), response.length(), 0);
-        }
-        // Handle unknown command
-        else {
-          const char* error_response = "-ERR uknown command\r\n";
-          send(client_socket, error_response, strlen(error_response), 0);
-        }
-      }
-
-      // Remove the processed part from accumulated_data
-      accumulated_data = accumulated_data.erase(0, current_pos);
+      // Retrieve parsed commands and store them
+      std::vector<std::string> new_commands = parser.get_parsed_commands();
+      commands.insert(commands.end(), new_commands.begin(), new_commands.end());
     }
+    catch (const std::exception& e) {
+      std::cerr << "Parsing error: " << e.what() << '\n';
+      break; 
+    }
+
+    if(commands[0] == "PING") {
+      const char* response = "+PING\r\n";
+      send(client_socket, response, strlen(response), 0);
+    }
+    else if(commands[0] == "ECHO") {
+      if(commands.size() != 2) {
+        std::cerr << "(error) ERR wrong number of arguments for command\n";
+        break;
+      }
+      else {
+        std::string response = "$" + std::to_string(commands[1].size()) + "\r\n" + commands[1] + "\r\n";
+        send(client_socket, response.c_str(), response.length(), 0);
+      }
+    }
+    // After processing, clear accumulated data and parsed commands
+      accumulated_data.clear();
+      commands.clear();
   }
 
   // Close the client socket when don
