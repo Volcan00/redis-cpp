@@ -11,13 +11,14 @@
 #include <unordered_map>
 
 #include "RESPParser.h"
+#include "KeyValueStore.h"
 
 void handle_client(int client_socket) {
   std::string accumulated_data;       // To accumulate incoming data
   RESPParser parser;                  // Parser instance
   std::vector<std::string> commands;  // Vector to store parsed commands as strings
 
-  std::unordered_map<std::string, std::string> set_get_map;
+  KeyValueStore store; // Instance of KeyValueStore to manage key-value data
 
 
   // Continuously handle client requests
@@ -57,7 +58,8 @@ void handle_client(int client_socket) {
     }
     else if(commands[0] == "ECHO") {
       if(commands.size() != 2) {
-        std::cerr << "(error) ERR wrong number of arguments for command\n";
+        const char* error_response = "(error) ERR wrong number of arguments for command\r\n";
+        send(client_socket, error_response, strlen(error_response), 0);
         break;
       }
       else {
@@ -66,36 +68,61 @@ void handle_client(int client_socket) {
       }
     }
     else if(commands[0] == "SET") {
-      if(commands.size() != 3) {
-        std::cerr << "(error) ERR wrong number of arguments for command\n";
+      if(commands.size() < 3) {
+        const char* error_response = "(error) ERR wrong number of arguments for command\r\n";
+        send(client_socket, error_response, strlen(error_response), 0);
         break;
       }
-      else {
-        set_get_map[commands[1]] = commands[2];
+      else if(commands.size() == 3) {
+        store.set(commands[1], commands[2]);
 
         const char* response = "+OK\r\n";
         send(client_socket, response, strlen(response), 0);
       }
+      else if(commands.size() == 5 && commands[3] == "px") {
+        // Parse expiry time in milliseconds
+        int expiry;
+
+        try {
+          expiry = stoi(commands[4]);
+        } 
+        catch(...) {
+          const char* error_response = "(error) ERR invalid expiry time in PX\r\n";
+          send(client_socket, error_response, strlen(error_response), 0);
+          break;
+        }
+
+        store.set(commands[1], commands[2], expiry);
+        const char* response = "+OK\r\n";
+        send(client_socket, response, strlen(response), 0);
+      }
+      else {
+          const char* error_response = "(error) ERR syntax error\r\n";
+          send(client_socket, error_response, strlen(error_response), 0);
+          break;
+      }
     }
     else if(commands[0] == "GET") {
       if(commands.size() != 2) {
-        std::cerr << "(error) ERR wrong number of arguments for command\n";
+        const char* error_response = "(error) ERR wrong number of arguments for command\r\n";
+        send(client_socket, error_response, strlen(error_response), 0);
         break;
       }
       else {
-        if(set_get_map.find(commands[1]) == set_get_map.end()) {
+        if(!store.existst(commands[1])) {
           const char* response = "$-1\r\n";
           send(client_socket, response, strlen(response), 0);
         }
         else {
-          std::string response = "$" + std::to_string(set_get_map[commands[1]].size()) + "\r\n" + set_get_map[commands[1]] + "\r\n";
+          std::string value = store.get(commands[1]);
+          std::string response = "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
           send(client_socket, response.c_str(), response.length(), 0);
         }
       }
     }
     else {
       std::cerr << "(error) unknown command\n";
-      break;;
+      break;
     }
     // After processing, clear accumulated data and parsed commands
       accumulated_data.clear();
