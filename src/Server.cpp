@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <thread>
+#include <unordered_map>
 
 #include "RESPParser.h"
 
@@ -15,7 +16,8 @@ void handle_client(int client_socket) {
   std::string accumulated_data;       // To accumulate incoming data
   RESPParser parser;                  // Parser instance
   std::vector<std::string> commands;  // Vector to store parsed commands as strings
-  int iteration = 1;
+
+  std::unordered_map<std::string, std::string> set_get_map;
 
 
   // Continuously handle client requests
@@ -50,7 +52,7 @@ void handle_client(int client_socket) {
     }
 
     if(commands[0] == "PING") {
-      const char* response = "+PING\r\n";
+      const char* response = "+PONG\r\n";
       send(client_socket, response, strlen(response), 0);
     }
     else if(commands[0] == "ECHO") {
@@ -62,6 +64,38 @@ void handle_client(int client_socket) {
         std::string response = "$" + std::to_string(commands[1].size()) + "\r\n" + commands[1] + "\r\n";
         send(client_socket, response.c_str(), response.length(), 0);
       }
+    }
+    else if(commands[0] == "SET") {
+      if(commands.size() != 3) {
+        std::cerr << "(error) ERR wrong number of arguments for command\n";
+        break;
+      }
+      else {
+        set_get_map[commands[1]] = commands[2];
+
+        const char* response = "+OK\r\n";
+        send(client_socket, response, strlen(response), 0);
+      }
+    }
+    else if(commands[0] == "GET") {
+      if(commands.size() != 2) {
+        std::cerr << "(error) ERR wrong number of arguments for command\n";
+        break;
+      }
+      else {
+        if(set_get_map.find(commands[1]) == set_get_map.end()) {
+          const char* response = "$-1\r\n";
+          send(client_socket, response, strlen(response), 0);
+        }
+        else {
+          std::string response = "$" + std::to_string(set_get_map[commands[1]].size()) + "\r\n" + set_get_map[commands[1]] + "\r\n";
+          send(client_socket, response.c_str(), response.length(), 0);
+        }
+      }
+    }
+    else {
+      std::cerr << "(error) unknown command\n";
+      break;;
     }
     // After processing, clear accumulated data and parsed commands
       accumulated_data.clear();
