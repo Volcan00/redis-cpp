@@ -24,7 +24,7 @@ std::string KeyValueStore::get(const std::string& key) {
     return (it != data.end()) ? it->second : "";
 }
 
-bool KeyValueStore::existst(const std::string& key) {
+bool KeyValueStore::exists(const std::string& key) {
     std::lock_guard<std::mutex> lock(map_mutex);
     return data.find(key) != data.end();
 }

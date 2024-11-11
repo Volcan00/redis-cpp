@@ -18,7 +18,7 @@ public:
     std::string get(const std::string& key);
 
     // Check if a key exists
-    bool existst(const std::string& key);
+    bool exists(const std::string& key);
 };
 
 #endif
