@@ -1,20 +1,13 @@
 #include "ServerHelperFunctions.h"
-#include "RESPParser.h"
-#include "KeyValueStore.h"
-#include "RdbParser.h"
-#include <cstdlib>
-#include <string>
-#include <thread>
 
-// Helper function to send responses
 void send_response(int client_socket, const std::string& response) {
     send(client_socket, response.c_str(), response.length(), 0);
 }
 
-// Helper function to send error messages
-void send_error(int client_socket, const char* error_msg);
+void send_error(int client_socket, const char* error_msg) {
+    send(client_socket, error_msg, strlen(error_msg), 0);
+}
 
-// Function to receive data from the client
 ssize_t receive_data(int client_socket, std::string& accumulated_data) {
   char buffer[1024];
 
@@ -27,7 +20,6 @@ ssize_t receive_data(int client_socket, std::string& accumulated_data) {
     return bytes_received;
 }
 
-// Function to process accumulated data with the parser
 void process_commands(std::string& accumulated_data, std::vector<std::string>& commands, RESPParser& parser) {
   // Feed accumulated data to the parser
   parser.feed(accumulated_data);
@@ -45,7 +37,6 @@ void process_commands(std::string& accumulated_data, std::vector<std::string>& c
     }
 }
 
-// Function to handle each command and respond to the client
 bool handle_command(int client_socket, const std::vector<std::string>& commands, int argc, char** argv, KeyValueStore& store) {
     if (commands[0] == "PING") {
         send_response(client_socket, "+PONG\r\n");
@@ -99,45 +90,49 @@ bool handle_command(int client_socket, const std::vector<std::string>& commands,
         }
     }
     else if(commands[0] == "CONFIG" && commands[1] == "GET") {
-      if(commands.size() < 3) {
+        if(commands.size() < 3) {
         send_error(client_socket, "(error) ERR wrong number of arguments for command\r\n");
         return false;
-      }
-      // Check if there are sufficient command-line arguments (argc should be at least 5)
-      if(argc < 5) {
+        }
+        // Check if there are sufficient command-line arguments (argc should be at least 5)
+        if(argc < 5) {
         // Send an error message to the client
         std::string error_msg = "(error) ERR missing command-line arguments.\n";
         error_msg += "Expected usage: ./your_program.sh --dir <directory> --dbfilename <filename>\n";
         send_error(client_socket, error_msg.c_str());
         return false;
-      }
+        }
 
-      if(commands[2] == "dir") {
+        if(commands[2] == "dir") {
         std::string response = "*2\r\n$3\r\ndir\r\n$" + std::to_string(strlen(argv[2])) + "\r\n" + argv[2] + "\r\n";
         send_response(client_socket, response); 
-      }
-      else if(commands[2] == "dbfilename") {
+        }
+        else if(commands[2] == "dbfilename") {
         std::string response = "*2\r\n$10\r\n$" + std::to_string(strlen(argv[4])) + "\r\n" + argv[4] + "\r\n";
         send_response(client_socket, response);
-      }
+        }
     }
     else if(commands[0] == "KEY") {
-      if(commands.size() != 2) {
+        if(commands.size() != 2) {
         send_error(client_socket, "(error) ERR wrong number of arguments for command\r\n");
         return false;
-      }
-      // Check if there are sufficient command-line arguments (argc should be at least 5)
-      if(argc < 5) {
+        }
+        // Check if there are sufficient command-line arguments (argc should be at least 5)
+        if(argc < 5) {
         std::string error_msg = "(error) ERR missing command-line arguments.\n";
         error_msg += "Expected usage: ./your_program.sh --dir <directory> --dbfilename <filename>\n";
         send_error(client_socket, error_msg.c_str());
         return false;
-      }
+        }
+
+        std::string filename = argv[4];
+        
     }
     else {
         std::cerr << "(error) unknown command\n";
         return false;
     }
+
     return true;
 }
 
@@ -174,69 +169,4 @@ void handle_client(int client_socket, int argc, char** argv) {
 
   // Close the client socket when don
   close(client_socket);
-}
-
-int main(int argc, char **argv) {
-  // Flush after every std::cout / std::cerr
-  std::cout << std::unitbuf;
-  std::cerr << std::unitbuf;
-
-  // Create a server socket
-  int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_fd < 0) {
-    std::cerr << "Failed to create server socket\n";
-    return 1;
-  }
-
-  // Allow reuse of the address to avoid "Address already in use" error
-  int reuse = 1;
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-    std::cerr << "setsockopt failed\n";
-    return 1;
-  }
-
-  // Set up server address and port (IPv4, any IP, port 6379)
-  struct sockaddr_in server_addr;
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_addr.s_addr = INADDR_ANY;
-  server_addr.sin_port = htons(6379);
-
-  // Bind the server socket to the specified address and port
-  if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
-    std::cerr << "Failed to bind to port 6379\n";
-    return 1;
-  }
-
-  // Start listening for incoming connections with a backlog of 5
-  int connection_backlog = 5;
-  if (listen(server_fd, connection_backlog) != 0) {
-    std::cerr << "listen failed\n";
-    return 1;
-  }
-
-  // Prepare to accept a client connection
-  struct sockaddr_in client_addr;
-  int client_addr_len = sizeof(client_addr);
-
-  std::cout << "Waiting for clients to connect...\n";
-
-  // Accept a connection from a client
-  while(true)
-  {
-    int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
-    if(client_fd < 0) {
-      std::cerr << "Failed to accept client connection.\n";
-      close(server_fd);
-      return 1;
-    }
-
-    std::thread client_therad(handle_client, client_fd, argc, argv);
-    client_therad.detach();
-    std::cout << "Client connected\n";
-  }
-
-  // Close the server socket
-  close(server_fd);
-
-  return 0;
 }
